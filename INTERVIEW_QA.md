@@ -10,7 +10,7 @@ Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
 ## 2. How are regional totals computed?
 
-For each row, the code uses `row.get("region", "unknown")` as the key and adds `float(row.get("revenue", 0))`. Two rows for the same region are summed in a Python dictionary.
+For each validated row, revenue is converted to `Decimal` and summed under a trimmed region key. The response retains numeric `totals` for compatibility and adds exact string `totals_decimal`, row count, and regional counts.
 
 Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
@@ -22,31 +22,31 @@ Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
 ## 4. Which goals are refused?
 
-Goals containing `delete`, `drop`, `update`, or `insert` return a refusal response. The matching is case-insensitive substring matching, not a SQL parser or execution permission system.
+Goals containing `delete`, `drop`, `update`, or `insert` return a refusal response. The matching uses complete case-insensitive tokens, not a SQL parser or execution permission system.
 
 Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
 ## 5. What happens when rows are absent?
 
-The code uses an empty list and returns empty totals. Missing revenue defaults to zero and a missing region defaults to `unknown`; explicit null or malformed rows have different behavior.
+Absent rows default to an empty list and return empty totals. Missing revenue defaults to zero and a missing region defaults to `unknown`. Malformed rows, blank/non-string regions, and invalid numeric values are rejected with `InputError`.
 
 Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
 ## 6. Are invalid rows converted into InputError?
 
-Not consistently. Invalid numeric strings can raise `ValueError` from `float`, and non-mapping rows can raise attribute errors. The handler catches only `InputError`, so these cases can surface as server errors.
+Yes for the validated domain inputs. Non-object rows, malformed payloads, invalid regions, booleans, non-finite revenues, excessive magnitude, and excessive decimal precision raise `InputError`; the handler returns HTTP 422.
 
 Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
 ## 7. Is float appropriate for financial totals?
 
-The prototype uses binary floating point. For precise monetary accounting, use integer minor units or a defined decimal representation and specify rounding behavior.
+Calculations now use decimal arithmetic. `totals_decimal` preserves the exact decimal result; numeric `totals` is retained for existing clients. Inputs allow at most six fractional places and magnitude up to 1e12; consumers should use the exact string field for accounting.
 
 Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
 ## 8. What should production input validation add?
 
-Validate payload shape, row types, required dimensions, finite numeric values, maximum row count, and permitted aggregation operations before running the calculation.
+The implementation now validates payload/row shape, finite decimal revenue, region values, and a 10,000-row limit. A next iteration should define business-specific dimensions, currency units, and permitted aggregation operations.
 
 Source: [src/sqlagent/agent.py](src/sqlagent/agent.py).
 
@@ -70,7 +70,7 @@ Source: [src/sqlagent/ops.py](src/sqlagent/ops.py).
 
 ## 12. What happens when a production job is approved?
 
-Targets exactly equal to `prod` or `production` create a `pending_approval` job and approval returns HTTP 403. Other target strings are queued. Approval of a lab job changes its status only; it does not execute a workload.
+Targets are trimmed and normalized to lowercase before policy checks. `prod` and `production`, including case/padding variants, create a `pending_approval` job and approval returns HTTP 403. Repeated lab approval is idempotent; approval changes a record only, without executing a workload.
 
 Source: [src/sqlagent/ops.py](src/sqlagent/ops.py).
 
